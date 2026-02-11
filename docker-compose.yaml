@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  whatsapp-scraper:
+    build: .
+    container_name: wsp_scraper_api
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./api.py:/app/api.py
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=admin
+      - RABBITMQ_PASS=Y6WbvI1n38tu
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+    networks:
+      - scraper-network
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: wsp_rabbitmq
+    ports:
+      - "5672:5672"   # Puerto AMQP
+      - "15672:15672" # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=mypassword
+      - RABBITMQ_DEFAULT_VHOST=/
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbitmq_logs:/var/log/rabbitmq
+    restart: unless-stopped
+    networks:
+      - scraper-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+networks:
+  scraper-network:
+    driver: bridge
+
+volumes:
+  rabbitmq_data:
+  rabbitmq_logs:
