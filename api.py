@@ -68,14 +68,15 @@ def create_optimized_driver():
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--disable-gpu") # Recomendado en Docker
     
-    # Bloqueo de carga de imágenes del sitio para velocidad
-    prefs = {"profile.managed_default_content_settings.images": 2}
-    chrome_options.add_experimental_option("prefs", prefs)
-    chrome_options.page_load_strategy = 'eager'
+    # IMPORTANTE: Apuntar al binario instalado en el Dockerfile
+    chrome_options.binary_location = "/usr/bin/google-chrome"
     
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    # En Docker, el driver ya suele estar disponible o usamos el binario directo
+    service = Service("/usr/bin/chromedriver") # Si instalas chromedriver vía apt
+    # O simplemente:
+    driver = webdriver.Chrome(options=chrome_options) 
     return driver
 
 global_driver = create_optimized_driver()
