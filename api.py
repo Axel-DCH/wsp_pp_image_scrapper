@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+import phonenumbers
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -157,14 +158,45 @@ def scrape_whatsapp_image(phone_number, country_dial_code):
     register_request(phone_key, "error", "No se pudo obtener la imagen Base64")
     return None
 
+def separar_numero(numero_completo):
+    try:
+        # Es necesario que el número empiece con "+" para que detecte el país automáticamente
+        if not numero_completo.startswith("+"):
+            numero_completo = "+" + numero_completo
+            
+        # Parsear el número
+        parsed_number = phonenumbers.parse(numero_completo, None)
+        
+        # Obtener las partes como STRINGS (importante para el resto del código)
+        codigo_pais = str(parsed_number.country_code)  # Ejemplo: "51"
+        numero_nacional = str(parsed_number.national_number)  # Ejemplo: "987654321"
+        
+        return codigo_pais, numero_nacional
+    except Exception as e:
+        print(f"Error al procesar número '{numero_completo}': {e}")
+        return None, None
+
+
 @app.route('/get_dp', methods=['GET'])
 def api_get_dp():
-    number = request.args.get('number')
-    country = request.args.get('country', '51')
+    # pasar solo a un argumento 
+    raw_number = request.args.get('number')
+    
+    if not raw_number:
+        return jsonify({
+            "status": "error", 
+            "message": "Falta parámetro 'number' (formato: +51987654321 o 51987654321)"
+        }), 400
+    
+    country, number = separar_numero(raw_number)
+
     is_icon = request.args.get('icon', 'false').lower() == 'true'
 
-    if not number:
-        return jsonify({"status": "error", "message": "Falta 'number'"}), 400
+    if not number or not country:
+        return jsonify({
+            "status": "error", 
+            "message": "Número inválido. Use formato internacional: +51987654321"
+        }), 400
 
     phone_key = f"{country}{number}"
     
