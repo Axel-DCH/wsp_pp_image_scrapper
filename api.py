@@ -4,6 +4,7 @@ import os
 import json
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -15,6 +16,7 @@ from PIL import Image
 import io
 
 app = Flask(__name__)
+CORS(app)  # Permitir CORS desde cualquier origen
 
 # Carpetas separadas para mantener el orden
 ORIGINALS_FOLDER = "downloads/originals"
