@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+import phonenumbers
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -65,27 +66,30 @@ def check_request_history(phone_key):
     log = load_request_log()
     return log.get(phone_key, None)
 
-def create_optimized_driver():
+def create_optimized_driver(headless=True):
+    """Crea un driver optimizado para Windows local."""
     chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    # Modo headless opcional (útil para desarrollo ver el navegador)
+    if headless:
+        chrome_options.add_argument("--headless=new")
+    
+    # Opciones para Windows
     chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
     
-    # Bloqueo de carga de imágenes del sitio para velocidad
-    prefs = {"profile.managed_default_content_settings.images": 2}
-    chrome_options.add_experimental_option("prefs", prefs)
-    chrome_options.page_load_strategy = 'eager'
+    # WebDriver Manager se encarga de descargar el chromedriver correcto automáticamente
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     
-    # Apuntar al binario de Chrome instalado en el Dockerfile
-    chrome_options.binary_location = "/usr/bin/google-chrome"
-    
-    # Usar chromedriver instalado en el sistema
-    driver = webdriver.Chrome(options=chrome_options)
     return driver
 
-global_driver = create_optimized_driver()
+# Inicializar driver global (puedes cambiar headless=False para ver el navegador)
+global_driver = create_optimized_driver(headless=True)
 
 def process_and_save_image(src_base64, phone_number, country_dial_code):
     """Decodifica Base64 y guarda la imagen original."""
@@ -172,17 +176,47 @@ def scrape_whatsapp_image(phone_number, country_dial_code):
     register_request(phone_key, "error", "No se pudo obtener la imagen Base64")
     return None
 
+def separar_numero(numero_completo):
+    try:
+        # Es necesario que el número empiece con "+" para que detecte el país automáticamente
+        if not numero_completo.startswith("+"):
+            numero_completo = "+" + numero_completo
+            
+        # Parsear el número
+        parsed_number = phonenumbers.parse(numero_completo, None)
+        
+        # Obtener las partes como STRINGS (importante para el resto del código)
+        codigo_pais = str(parsed_number.country_code)  # Ejemplo: "51"
+        numero_nacional = str(parsed_number.national_number)  # Ejemplo: "987654321"
+        
+        return codigo_pais, numero_nacional
+    except Exception as e:
+        print(f"Error al procesar número '{numero_completo}': {e}")
+        return None, None
+
+
 @app.route('/get_dp', methods=['GET'])
 def api_get_dp():
-    number = request.args.get('number')
-    country = request.args.get('country', '51')
+    # pasar solo a un argumento 
+    raw_number = request.args.get('number')
+    
+    if not raw_number:
+        return jsonify({
+            "status": "error", 
+            "message": "Falta parámetro 'number' (formato: +51987654321 o 51987654321)",
+            "phone_number": None,
+            "image": None
+        }), 400
+    
+    country, number = separar_numero(raw_number)
+
     is_icon = request.args.get('icon', 'false').lower() == 'true'
 
-    if not number:
+    if not number or not country:
         return jsonify({
-            "status": "error",
-            "message": "Falta parámetro 'number'",
-            "phone_number": None,
+            "status": "error", 
+            "message": "Número inválido. Use formato internacional: +51987654321",
+            "phone_number": raw_number,
             "image": None
         }), 400
 
@@ -280,5 +314,30 @@ def api_get_dp():
                 "image": None
             }), 500
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Endpoint para verificar el estado de la API."""
+    return jsonify({
+        "status": "ok",
+        "message": "API funcionando correctamente",
+        "version": "local_win_1.0"
+    }), 200
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', threaded=False, port=5000)
+    print("=" * 60)
+    print("🚀 WhatsApp DP Scraper API - Windows Local Edition")
+    print("=" * 60)
+    print("📍 Servidor corriendo en: http://localhost:5000")
+    print("📖 Documentación: http://localhost:5000/health")
+    print("\n💡 Ejemplo de uso:")
+    print("   http://localhost:5000/get_dp?number=+51987654321")
+    print("   http://localhost:5000/get_dp?number=51987654321&icon=true")
+    print("\n⚙️  Modo headless: Activado (cambiar en línea 94 para ver navegador)")
+    print("=" * 60)
+    
+    try:
+        app.run(host='127.0.0.1', port=5000, debug=True, threaded=False)
+    finally:
+        print("\n🛑 Cerrando navegador...")
+        global_driver.quit()
+        print("✅ Navegador cerrado correctamente")

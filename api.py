@@ -71,15 +71,13 @@ def create_optimized_driver():
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu") # Recomendado en Docker
+    chrome_options.add_argument("--disable-gpu")
     
-    # IMPORTANTE: Apuntar al binario instalado en el Dockerfile
+    # Apuntar al binario de Chrome instalado en el Dockerfile
     chrome_options.binary_location = "/usr/bin/google-chrome"
     
-    # En Docker, el driver ya suele estar disponible o usamos el binario directo
-    service = Service("/usr/bin/chromedriver") # Si instalas chromedriver vía apt
-    # O simplemente:
-    driver = webdriver.Chrome(options=chrome_options) 
+    # Usar chromedriver instalado en el sistema
+    driver = webdriver.Chrome(options=chrome_options)
     return driver
 
 global_driver = create_optimized_driver()
@@ -111,6 +109,17 @@ def create_icon(phone_number):
             img.save(icon_path, "JPEG", quality=90)
         return icon_path
     return None
+
+def image_to_base64(file_path):
+    """Convierte una imagen a base64 para respuesta JSON."""
+    try:
+        with open(file_path, 'rb') as img_file:
+            img_bytes = img_file.read()
+            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+            return f"data:image/jpeg;base64,{img_base64}"
+    except Exception as e:
+        print(f"Error convirtiendo imagen a base64: {e}")
+        return None
 
 def scrape_whatsapp_image(phone_number, country_dial_code):
     """Lógica de navegación Selenium."""
@@ -185,7 +194,9 @@ def api_get_dp():
     if not raw_number:
         return jsonify({
             "status": "error", 
-            "message": "Falta parámetro 'number' (formato: +51987654321 o 51987654321)"
+            "message": "Falta parámetro 'number' (formato: +51987654321 o 51987654321)",
+            "phone_number": None,
+            "image": None
         }), 400
     
     country, number = separar_numero(raw_number)
@@ -195,7 +206,9 @@ def api_get_dp():
     if not number or not country:
         return jsonify({
             "status": "error", 
-            "message": "Número inválido. Use formato internacional: +51987654321"
+            "message": "Número inválido. Use formato internacional: +51987654321",
+            "phone_number": raw_number,
+            "image": None
         }), 400
 
     phone_key = f"{country}{number}"
@@ -208,8 +221,10 @@ def api_get_dp():
         if history["status"] in ["private", "error"]:
             print(f"⚠️ Número ya consultado previamente: {phone_key} - Estado: {history['status']}")
             return jsonify({
-                "status": history["status"],
+                "status": "negative" if history["status"] == "private" else "error",
                 "message": history["message"],
+                "phone_number": f"+{country}{number}",
+                "image": None,
                 "last_attempt": history["timestamp"],
                 "attempts": history["attempts"]
             }), 404 if history["status"] == "private" else 500
@@ -222,27 +237,73 @@ def api_get_dp():
         # Actualizar registro como exitoso si existe el archivo
         register_request(phone_key, "success", "Servido desde caché")
         
+        file_to_send = original_file
         if is_icon:
             icon_file = os.path.join(ICONS_FOLDER, f"{phone_key}_icon.jpg")
             if not os.path.exists(icon_file):
                 create_icon(phone_key)
-            return send_file(icon_file, mimetype='image/jpeg')
-        return send_file(original_file, mimetype='image/jpeg')
+            file_to_send = icon_file
+        
+        # Convertir imagen a base64 y devolver JSON
+        image_b64 = image_to_base64(file_to_send)
+        if image_b64:
+            return jsonify({
+                "status": "success",
+                "message": "Imagen encontrada en caché",
+                "phone_number": f"+{country}{number}",
+                "image": image_b64,
+                "format": "icon" if is_icon else "original"
+            }), 200
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Error al codificar imagen",
+                "phone_number": f"+{country}{number}",
+                "image": None
+            }), 500
 
     # --- PASO 3: SI NO EXISTE, REALIZAR SCRAPPING ---
     print(f"🔍 Iniciando scrapping para: +{country} {number}")
     result = scrape_whatsapp_image(number, country)
 
     if result == "private":
-        return jsonify({"status": "negative", "message": "Privado o inexistente"}), 404
+        return jsonify({
+            "status": "negative",
+            "message": "Foto de perfil privada o no disponible",
+            "phone_number": f"+{country}{number}",
+            "image": None
+        }), 404
     elif result == "error" or result is None:
-        return jsonify({"status": "error", "message": "Fallo en el proceso"}), 500
+        return jsonify({
+            "status": "error",
+            "message": "Fallo en el proceso de scraping",
+            "phone_number": f"+{country}{number}",
+            "image": None
+        }), 500
     else:
         # Si se pidió icono, generarlo tras el scrapping
+        file_to_send = result
         if is_icon:
             icon_path = create_icon(phone_key)
-            return send_file(icon_path, mimetype='image/jpeg')
-        return send_file(result, mimetype='image/jpeg')
+            file_to_send = icon_path
+        
+        # Convertir imagen a base64 y devolver JSON
+        image_b64 = image_to_base64(file_to_send)
+        if image_b64:
+            return jsonify({
+                "status": "success",
+                "message": "Imagen descargada exitosamente",
+                "phone_number": f"+{country}{number}",
+                "image": image_b64,
+                "format": "icon" if is_icon else "original"
+            }), 200
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Error al codificar imagen",
+                "phone_number": f"+{country}{number}",
+                "image": None
+            }), 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', threaded=False, port=5000)
